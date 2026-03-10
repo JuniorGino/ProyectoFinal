@@ -1,0 +1,27 @@
+{
+  "name": "memoryappweb",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm run dev"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@heroicons/react": "^2.2.0",
+    "axios": "^1.13.6",
+    "geolib": "^3.3.4",
+    "leaflet": "^1.9.4",
+    "lodash": "^4.17.23",
+    "lucide-react": "^0.577.0",
+    "react-leaflet": "^5.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
