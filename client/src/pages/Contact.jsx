@@ -1,3 +1,13 @@
+/**
+ * PORTAL DE CONTACTO Y SOPORTE - Contact.jsx
+ * 
+ * Este componente proporciona a los usuarios canales de soporte técnico y consulta para Tisinapp.
+ * Presenta:
+ * - Tarjetas de información de contacto (Email, Teléfono y Oficinas) con efectos Hover.
+ * - Un formulario de consulta integrado con campos de entrada (Nombre, Email, Mensaje).
+ * - Animaciones en cascada y suaves mediante Framer Motion.
+ */
+
 import React from 'react';
 import { Mail, Phone, MapPin, Send } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -7,6 +17,7 @@ const Contact = () => {
         <div className="page-container" style={{ width: '100%' }}>
             <div style={{ padding: '4rem 2rem', maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '3rem' }}>
 
+                {/* Cabecera del Portal */}
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -18,9 +29,10 @@ const Contact = () => {
                     </p>
                 </motion.div>
 
+                {/* Grid principal de dos columnas (Tarjetas e Información de Contacto / Formulario) */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '3rem' }}>
 
-                    {/* Info Cards */}
+                    {/* Tarjetas de Información de Contacto */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                         {[
                             { icon: Mail, title: "Correo Electrónico", detail: "soporte@tisinapp.com", color: 'var(--accent)' },
@@ -35,6 +47,7 @@ const Contact = () => {
                                 className="glass-panel"
                                 style={{ padding: '2rem', borderRadius: '24px', display: 'flex', alignItems: 'flex-start', gap: '1.5rem', background: 'rgba(15, 23, 42, 0.4)', border: '1px solid rgba(255,255,255,0.08)' }}
                             >
+                                {/* Icono decorativo en tarjeta */}
                                 <div style={{ padding: '0.9rem', background: `${item.color}15`, color: item.color, borderRadius: '16px', border: `1px solid ${item.color}30` }}>
                                     <item.icon size={26} />
                                 </div>
@@ -46,7 +59,7 @@ const Contact = () => {
                         ))}
                     </div>
 
-                    {/* Contact Form */}
+                    {/* Formulario de Contacto interactivo */}
                     <motion.div
                         initial={{ opacity: 0, x: 30 }}
                         animate={{ opacity: 1, x: 0 }}

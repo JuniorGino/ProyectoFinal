@@ -1,3 +1,10 @@
+/*
+  PROTOTIPO LEGADO (HISTÓRICO) - style.css
+  Estilos CSS del prototipo inicial de una sola página de MemoryApp (Tisinapp).
+  
+  NOTA: La versión moderna modular utiliza React e index.css ubicados en la carpeta /client.
+*/
+
 :root {
     --primary: #6366f1;
     --primary-hover: #4f46e5;

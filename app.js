@@ -1,3 +1,14 @@
+/**
+ * PROTOTIPO LEGADO (HISTÓRICO) - app.js
+ * 
+ * Lógica en Vanilla JavaScript para la versión prototipo inicial de MemoryApp (Tisinapp).
+ * Utiliza Leaflet.js para interacción de mapas directamente en el navegador, Nominatim
+ * para geocodificación inversa, y el LocalStorage para persistencia local de recordatorios.
+ * 
+ * NOTA: La versión moderna modular está construida sobre React (dentro de la carpeta /client)
+ * y una API Node.js/Express (en la carpeta /server).
+ */
+
 // Configuración y Estado Global
 let map;
 let userMarker;

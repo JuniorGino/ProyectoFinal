@@ -1,3 +1,14 @@
+/**
+ * VISTA DE AUTENTICACIÓN (LOGIN Y REGISTRO) - Register.jsx
+ * 
+ * Este archivo gestiona el acceso de los usuarios a Tisinapp.
+ * Contiene un formulario único de doble comportamiento (Login/Registro) con:
+ * - Estados de React para capturar los datos del formulario (`name`, `email`, `password`).
+ * - Estados para manejar errores y notificaciones de éxito (`error`).
+ * - Transiciones y animaciones fluidas con Framer Motion (`motion.div`, `AnimatePresence`).
+ * - Conexión con el servidor backend mediante Axios (`axios.post`) para validar o crear la cuenta.
+ */
+
 import React, { useState } from 'react';
 import { UserPlus, Mail, Lock, ArrowRight, LogIn as LogInIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -5,38 +16,62 @@ import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const Auth = () => {
+    // Controla si se muestra el formulario de inicio de sesión (true) o registro (false)
     const [isLogin, setIsLogin] = useState(true);
+    
+    // Almacena los campos del formulario
     const [formData, setFormData] = useState({ name: '', email: '', password: '' });
+    
+    // Almacena los mensajes de error o éxito que se mostrarán en pantalla
     const [error, setError] = useState('');
+    
     const navigate = useNavigate();
 
+    /**
+     * Captura el cambio en los inputs del formulario y actualiza el estado correspondiente.
+     */
     const handleChange = (e) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
     };
 
+    /**
+     * Alterna la vista entre Inicio de Sesión y Registro, limpiando estados de error.
+     */
     const toggleMode = () => {
         setIsLogin(!isLogin);
         setError('');
-        setFormData({ name: '', email: '', password: '' });
+        setFormData({ name: '', email: '', password: '' }); // Reinicia el formulario
     };
 
+    /**
+     * Envía la solicitud de Login o Registro al servidor REST local.
+     */
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setError('');
+        setError(''); // Limpia errores anteriores
         try {
             if (isLogin) {
+                // Petición POST para verificar las credenciales del usuario
                 const resp = await axios.post('http://localhost:5000/api/auth/login', {
                     email: formData.email,
                     password: formData.password
                 });
+                
+                // Si es correcto, guarda los datos del usuario logueado en LocalStorage
                 localStorage.setItem('user', JSON.stringify(resp.data));
+                
+                // Redirige al Asistente/Recordatorios
                 navigate('/assistant');
             } else {
+                // Petición POST para registrar una cuenta nueva
                 await axios.post('http://localhost:5000/api/auth/register', formData);
+                
+                // Cambia al formulario de login tras el éxito e informa al usuario
                 setIsLogin(true);
                 setError('¡Registro completado! Ahora puedes entrar.');
             }
         } catch (err) {
+            // Captura errores retornados por el servidor o errores de conexión
             setError(err.response?.data?.message || (isLogin ? 'Credenciales incorrectas' : 'Error al registrar.'));
         }
     };
@@ -59,7 +94,7 @@ const Auth = () => {
                     boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
                 }}
             >
-
+                {/* Cabecera del panel de autenticación */}
                 <header style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
                     <motion.div
                         key={isLogin ? 'login-icon' : 'reg-icon'}
@@ -78,6 +113,7 @@ const Auth = () => {
                 </header>
 
                 <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                    {/* Alertas de error/éxito animadas */}
                     <AnimatePresence mode="wait">
                         {error && (
                             <motion.div
@@ -99,6 +135,7 @@ const Auth = () => {
                         )}
                     </AnimatePresence>
 
+                    {/* Campo Nombre (solo visible en Registro) */}
                     {!isLogin && (
                         <div className="input-group" style={{ position: 'relative' }}>
                             <UserPlus size={20} style={{ position: 'absolute', left: '1.2rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)' }} />
@@ -114,6 +151,7 @@ const Auth = () => {
                         </div>
                     )}
 
+                    {/* Campo Correo Electrónico */}
                     <div className="input-group" style={{ position: 'relative' }}>
                         <Mail size={20} style={{ position: 'absolute', left: '1.2rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)' }} />
                         <input
@@ -127,6 +165,7 @@ const Auth = () => {
                         />
                     </div>
 
+                    {/* Campo Contraseña */}
                     <div className="input-group" style={{ position: 'relative' }}>
                         <Lock size={20} style={{ position: 'absolute', left: '1.2rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)' }} />
                         <input
@@ -140,6 +179,7 @@ const Auth = () => {
                         />
                     </div>
 
+                    {/* Botón de Envío */}
                     <motion.button
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
@@ -154,6 +194,7 @@ const Auth = () => {
                     </motion.button>
                 </form>
 
+                {/* Alternador de Modo (Login <-> Register) */}
                 <p style={{ textAlign: 'center', marginTop: '2.5rem', fontSize: '0.95rem', color: 'rgba(255,255,255,0.4)' }}>
                     {isLogin ? '¿Todavía sin cuenta? ' : '¿Ya eres miembro? '}
                     <span onClick={toggleMode} style={{ color: 'var(--primary)', cursor: 'pointer', fontWeight: '700', textDecoration: 'underline', textUnderlineOffset: '4px' }}>

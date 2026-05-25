@@ -1,10 +1,26 @@
-import React, { useState, useEffect, useRef } from 'react';
+/**
+ * GESTOR DE RECORDATORIOS (PÁGINA PRINCIPAL) - Assistant.jsx
+ * 
+ * Este componente es el núcleo interactivo de Tisinapp.
+ * Contiene:
+ * 1. **Gestión de Estados (React):** Recordatorios existentes, ubicación del usuario, filtros de visualización,
+ *    modo de vista (lista/calendario), colapso de la barra lateral, datos del nuevo recordatorio en creación,
+ *    y notificaciones ya disparadas para evitar alertas duplicadas.
+ * 2. **Notificaciones y Geolocalización en Tiempo Real:** 
+ *    - Rastrea la ubicación mediante la API nativa de Geolocalización.
+ *    - Compara distancias en metros usando `geolib.getDistance`.
+ *    - Envía alertas visuales y sonoras (notificaciones de navegador) si el usuario ingresa en el radio.
+ *    - Compara el tiempo para alarmas horarias.
+ * 3. **Interacción con Mapa (Leaflet):** Selecciona ubicaciones al hacer clic y las asigna al formulario.
+ * 4. **CRUD completo con NeDB (Backend local):** Peticiones Axios para registrar, eliminar y completar recordatorios.
+ */
+
+import React, { useState, useEffect } from 'react';
 import MapView from '../components/Map';
 import axios from 'axios';
 import {
     Bell, MapPin, Trash2, CheckCircle, Clock, LayoutGrid, CheckCircle2,
-    Navigation, Send, MessageSquare, Loader2, Sparkles, ChevronLeft,
-    ChevronRight, Calendar as CalendarIcon, AlarmClock, List
+    Sparkles, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlarmClock, List, Plus
 } from 'lucide-react';
 import { getDistance } from 'geolib';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -15,56 +31,65 @@ import {
 } from 'date-fns';
 import { es } from 'date-fns/locale';
 
+// Endpoint base del servidor para las operaciones CRUD
 const API_URL = 'http://localhost:5000/api/reminders';
 
 function Assistant() {
-    const [reminders, setReminders] = useState([]);
-    const [userLocation, setUserLocation] = useState(null);
-    const [isAdding, setIsAdding] = useState(false);
-    const [filter, setFilter] = useState('active');
-    const [viewMode, setViewMode] = useState('list'); // 'list' or 'calendar'
-    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    const [selectedReminder, setSelectedReminder] = useState(null);
-
+    // ==========================================
+    // ESTADOS GLOBALES DE LA PÁGINA
+    // ==========================================
+    const [reminders, setReminders] = useState([]); // Arreglo con todos los recordatorios
+    const [userLocation, setUserLocation] = useState(null); // Ubicación [lat, lng] actual del usuario
+    const [filter, setFilter] = useState('active'); // Filtro de lista: 'active' (Libres), 'completed' (Hechos), 'all' (Todos)
+    const [viewMode, setViewMode] = useState('list'); // Vista de la barra lateral: 'list' (Lista) o 'calendar' (Calendario)
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(false); // Alterna colapso de barra lateral
+    const [selectedReminder, setSelectedReminder] = useState(null); // Recordatorio seleccionado para popup detallado
+    
+    // ==========================================
+    // ESTADOS DEL FORMULARIO DE CREACIÓN
+    // ==========================================
+    const [reminderType, setReminderType] = useState('alarm'); // Tipo seleccionado: 'alarm' (alarma horaria) o 'gps' (geo-alerta)
     const [newReminder, setNewReminder] = useState({
         title: '',
         description: '',
         address: '',
-        coordinates: null,
-        radius: 1,
-        date: format(new Date(), 'yyyy-MM-dd'),
+        coordinates: null, // [lng, lat] obtenidos del clic en mapa
+        radius: 1, // Radio inicial por defecto en 1km
+        date: format(new Date(), 'yyyy-MM-dd'), // Fecha inicial hoy
         time: ''
     });
 
+    // Control para evitar la repetición constante de notificaciones push
     const [notifiedIds, setNotifiedIds] = useState(new Set());
+    // Control de mes mostrado en la vista de Calendario
     const [currentMonth, setCurrentMonth] = useState(new Date());
 
-    // Asistente Chat States
-    const [chatInput, setChatInput] = useState('');
-    const [chatHistory, setChatHistory] = useState([
-        { role: 'assistant', content: '¡Hola! Soy la IA de Tisinapp. 👋 ¿Quieres configurar un recordatorio por ubicación o una alarma para un día específico?' }
-    ]);
-    const [isTyping, setIsTyping] = useState(false);
-    const chatEndRef = useRef(null);
-
+    // ==========================================
+    // EFECTOS (USEEFFECT)
+    // ==========================================
     useEffect(() => {
+        // Carga los recordatorios y rastrea la ubicación del usuario al montar el componente
         fetchReminders();
         trackLocation();
 
-        // Timer for Time Alarms
-        const timer = setInterval(checkTimeAlarms, 30000); // Check every 30 seconds
+        // Configura un temporizador para comprobar alarmas de reloj cada 30 segundos
+        const timer = setInterval(checkTimeAlarms, 30000);
 
+        // Solicita permisos para notificaciones push en el navegador
         if ("Notification" in window && Notification.permission !== "granted") {
             Notification.requestPermission();
         }
 
-        return () => clearInterval(timer);
+        return () => clearInterval(timer); // Limpieza al desmontar
     }, []);
 
-    useEffect(() => {
-        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [chatHistory, isTyping]);
+    // ==========================================
+    // OPERACIONES CRUD (CONEXIÓN CON API REST)
+    // ==========================================
 
+    /**
+     * Obtiene los recordatorios de la base de datos local (NeDB) mediante GET.
+     */
     const fetchReminders = async () => {
         try {
             const resp = await axios.get(API_URL);
@@ -74,6 +99,76 @@ function Assistant() {
         }
     };
 
+    /**
+     * Guarda el recordatorio (Alarma o Geo-Alerta) llamando a POST.
+     */
+    const saveReminder = async () => {
+        if (!newReminder.title) {
+            alert('Introduce un título para el recordatorio');
+            return;
+        }
+
+        // Formatea la solicitud según el tipo de recordatorio
+        const reminderData = {
+            title: newReminder.title,
+            description: newReminder.description,
+            address: reminderType === 'gps' ? newReminder.address : '',
+            coordinates: reminderType === 'gps' ? newReminder.coordinates : null,
+            radius: reminderType === 'gps' ? newReminder.radius : 1,
+            date: newReminder.date,
+            time: newReminder.time
+        };
+
+        try {
+            await axios.post(API_URL, reminderData);
+            // Reinicia los campos del formulario tras guardar con éxito
+            setNewReminder({
+                title: '',
+                description: '',
+                address: '',
+                coordinates: null,
+                radius: 1,
+                date: format(new Date(), 'yyyy-MM-dd'),
+                time: ''
+            });
+            fetchReminders(); // Refresca el listado de recordatorios
+        } catch (err) {
+            console.error("Error saving reminder", err);
+        }
+    };
+
+    /**
+     * Cambia el estado del recordatorio entre 'active' y 'completed' llamando a PATCH.
+     */
+    const toggleComplete = async (reminder) => {
+        const newStatus = reminder.status === 'active' ? 'completed' : 'active';
+        try {
+            await axios.patch(`${API_URL}/${reminder._id}`, { status: newStatus });
+            fetchReminders();
+        } catch (err) {
+            console.error("Error updating status", err);
+        }
+    };
+
+    /**
+     * Elimina el recordatorio de forma permanente llamando a DELETE.
+     */
+    const deleteReminder = async (id) => {
+        try {
+            await axios.delete(`${API_URL}/${id}`);
+            fetchReminders();
+        } catch (err) {
+            console.error("Error deleting reminder", err);
+        }
+    };
+
+    // ==========================================
+    // GEOLOCALIZACIÓN Y ALERTAS EN TIEMPO REAL
+    // ==========================================
+
+    /**
+     * Inicia el rastreo de ubicación mediante watchPosition.
+     */
     const trackLocation = () => {
         if ("geolocation" in navigator) {
             navigator.geolocation.watchPosition(
@@ -83,10 +178,11 @@ function Assistant() {
                         longitude: pos.coords.longitude
                     };
                     setUserLocation(newPos);
-                    checkProximity(newPos);
+                    checkProximity(newPos); // Comprueba si se activan alertas
                 },
                 (err) => {
                     console.warn("Geolocation error:", err.message);
+                    // Caída por defecto en Madrid si se rechaza el permiso de ubicación
                     if (!userLocation) {
                         setUserLocation({ latitude: 40.4168, longitude: -3.7038, isFallback: true });
                     }
@@ -96,6 +192,9 @@ function Assistant() {
         }
     };
 
+    /**
+     * Compara la distancia a cada geo-alerta. Lanza notificaciones si el usuario ingresa en el radio.
+     */
     const checkProximity = (currentPos) => {
         reminders.forEach(r => {
             if (r.status !== 'active' || !r.location) return;
@@ -104,9 +203,10 @@ function Assistant() {
                 { latitude: r.location.coordinates[1], longitude: r.location.coordinates[0] }
             );
             const radiusInMeters = (r.radius || 1) * 1000;
+            
             if (distance <= radiusInMeters && !notifiedIds.has(r._id)) {
                 sendNotification(r, 'proximity');
-                setNotifiedIds(prev => new Set(prev).add(r._id));
+                setNotifiedIds(prev => new Set(prev).add(r._id)); // Evita bucle de alertas
             } else if (distance > radiusInMeters && notifiedIds.has(r._id)) {
                 setNotifiedIds(prev => {
                     const next = new Set(prev);
@@ -117,6 +217,9 @@ function Assistant() {
         });
     };
 
+    /**
+     * Compara la fecha y hora actuales para disparar alarmas clásicas de reloj.
+     */
     const checkTimeAlarms = () => {
         const now = new Date();
         const currentDate = format(now, 'yyyy-MM-dd');
@@ -131,6 +234,9 @@ function Assistant() {
         });
     };
 
+    /**
+     * Utiliza la API nativa de notificaciones de navegador para alertar al usuario.
+     */
     const sendNotification = (reminder, type) => {
         const title = type === 'time' ? `¡Alarma Tisinapp! ⏰` : `¡Tisinapp Alerta! 📍`;
         const body = type === 'time'
@@ -142,6 +248,10 @@ function Assistant() {
         }
     };
 
+    /**
+     * Captura el clic del usuario en el mapa, obtiene la dirección postal mediante geocodificación inversa
+     * con Nominatim y la asigna al formulario.
+     */
     const handleMapClick = async (latlng) => {
         const { lat, lng } = latlng;
         try {
@@ -149,449 +259,23 @@ function Assistant() {
                 headers: { 'Accept-Language': 'es' }
             });
             const address = resp.data.display_name || 'Ubicación seleccionada';
-            setNewReminder({ ...newReminder, address, coordinates: [lng, lat] });
-            setIsAdding(true);
-            setSidebarCollapsed(false);
-            addMessage('assistant', `He marcado este punto: "${address.split(',')[0]}". ¿Qué día y qué quieres recordar aquí?`);
+            
+            // Llena la sección de GPS del formulario
+            setNewReminder(prev => ({
+                ...prev,
+                address,
+                coordinates: [lng, lat]
+            }));
+            setReminderType('gps'); // Alterna automáticamente al modo GPS
+            setSidebarCollapsed(false); // Expande la barra lateral para permitir edición
         } catch (err) {
             console.error("Geocoding error", err);
         }
     };
 
-    const saveReminder = async () => {
-        if (!newReminder.title) return;
-        try {
-            await axios.post(API_URL, newReminder);
-            setIsAdding(false);
-            const title = newReminder.title;
-            setNewReminder({
-                title: '', description: '', address: '', coordinates: null, radius: 1,
-                date: format(new Date(), 'yyyy-MM-dd'), time: ''
-            });
-            fetchReminders();
-            addMessage('assistant', `¡Configurado! He guardado "${title}". Estaré atento para avisarte. ✨`);
-        } catch (err) {
-            console.error("Error saving reminder", err);
-        }
-    };
-
-    const addMessage = (role, content) => {
-        setChatHistory(prev => [...prev, { role, content }]);
-    };
-
-    const [conversationState, setConversationState] = useState({ stage: 'idle', data: {} });
-
-    // Helper para detectar similitud de palabras (manejo de errores ortográficos)
-    const matchesKeyword = (input, keywords) => {
-        const words = input.toLowerCase().split(/\s+/);
-        return keywords.some(k =>
-            words.some(w => {
-                if (w.includes(k) || k.includes(w)) return true;
-                // Similitud básica por longitud y caracteres comunes
-                if (Math.abs(w.length - k.length) <= 2) {
-                    let common = 0;
-                    for (let char of k) if (w.includes(char)) common++;
-                    return common >= k.length - 1;
-                }
-                return false;
-            })
-        );
-    };
-
-    const processChatCommand = async (e) => {
-        e.preventDefault();
-        if (!chatInput.trim()) return;
-
-        const input = chatInput;
-        addMessage('user', input);
-        setChatInput('');
-        setIsTyping(true);
-
-        const lowerInput = input.toLowerCase().trim();
-
-        setTimeout(async () => {
-            try {
-                // DICCIONARIOS AMPLIADOS
-                const triggers = ['recuerdame', 'recuerda', 'recuernm', 'recuérdame', 'recuerden', 'reuerda', 'recuardame', 'recuerdamen'];
-                const geoKeywords = ['geo', 'lugar', 'sitio', 'ubicacion', 'ubicasion', 'mapa', 'gps', 'donde', 'direcion', 'cerca', 'distancia'];
-                const alarmKeywords = ['alarma', 'reloj', 'hora', 'pitar', 'avisame', 'solo hora', 'sin mapa'];
-                const todayKeywords = ['hoy', 'oi', 'oy', 'ahora', 'mismo', 'esta mañana'];
-                const tomorrowKeywords = ['mañana', 'manyana', 'mañaa', 'otro dia'];
-                const periodKeywords = {
-                    morning: ['mañana', 'am', 'temprano', 'madrugada'],
-                    afternoon: ['tarde', 'pm', 'sobre las', 'merienda'],
-                    night: ['noche', 'noce', 'cena', 'tardecita']
-                };
-
-                // --- MÁQUINA DE ESTADOS ---
-
-                if (conversationState.stage === 'awaiting_type') {
-                    const isGeo = matchesKeyword(lowerInput, geoKeywords);
-                    const type = isGeo ? 'geo' : 'alarm';
-                    setIsTyping(false);
-                    addMessage('assistant', `Vale, ${type === 'geo' ? 'lo buscaremos en el mapa' : 'será una alarma sencilla'}. ¿Qué es lo que quieres que te recuerde exactamente?`);
-                    setConversationState({ stage: 'awaiting_title', data: { ...conversationState.data, type } });
-                    return;
-                }
-
-                if (conversationState.stage === 'awaiting_title') {
-                    setIsTyping(false);
-                    addMessage('assistant', `Anotado: "${input}". ¿Para qué día lo preparamos? (Hoy, mañana, o dime una fecha).`);
-                    setConversationState({ stage: 'awaiting_day', data: { ...conversationState.data, title: input } });
-                    return;
-                }
-
-                if (conversationState.stage === 'awaiting_day') {
-                    const getAdvancedDate = (text) => {
-                        const now = new Date();
-                        let target = new Date();
-                        if (text.match(/(\d{1,2})\s*del\s*mes\s*que\s*viene/i)) {
-                            target = addMonths(startOfMonth(now), 1);
-                            target.setDate(parseInt(text.match(/(\d{1,2})/)[0]));
-                        } else if (text.match(/(\d{1,2})\s*de\s*(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/i)) {
-                            const monthNames = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-                            const mMatch = text.match(/(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/i);
-                            const mIdx = monthNames.indexOf(mMatch[0].toLowerCase());
-                            target.setMonth(mIdx);
-                            target.setDate(parseInt(text.match(/(\d{1,2})/)[0]));
-                        } else if (text.match(/dia\s*(\d{1,2})|día\s*(\d{1,2})|el\s*(\d{1,2})/i)) {
-                            const day = parseInt(text.match(/(\d{1,2})/)[0]);
-                            target.setDate(day);
-                            if (target < now) target = addMonths(target, 1);
-                        } else if (matchesKeyword(text, tomorrowKeywords)) {
-                            target = addDays(now, 1);
-                        } else if (matchesKeyword(text, todayKeywords)) {
-                            target = now;
-                        } else if (text.includes("no") || text.includes("paso") || text.includes("nada")) {
-                            target = now;
-                        } else {
-                            const dm = text.match(/(\d{1,2})[/-](\d{1,2})/);
-                            if (dm) {
-                                target.setMonth(parseInt(dm[2]) - 1);
-                                target.setDate(parseInt(dm[1]));
-                            }
-                        }
-                        return format(target, 'yyyy-MM-dd');
-                    };
-
-                    const dateStr = getAdvancedDate(lowerInput);
-
-                    // EXTRA: Detectar si también puso la hora aquí
-                    const timeRegex = /(\d{1,2})[:h](\d{2})|(?<=las|la|a las|a la|las\s|la\s|a\slas\s|a\sla\s|^)(\d{1,2})\b/gi;
-                    const tMatch = lowerInput.match(timeRegex);
-                    let detectedTime = null;
-                    let isAmbig = false;
-                    let ambigH, ambigM;
-
-                    if (tMatch) {
-                        let h = tMatch[0].replace(/[:h]/g, ":").split(":")[0].trim();
-                        let m = tMatch[0].includes(":") ? tMatch[0].split(":")[1] : "00";
-                        let hourInt = parseInt(h);
-                        
-                        const hasPeriod = (lowerInput.includes("tarde") || lowerInput.includes("noche") || lowerInput.includes("pm") || lowerInput.includes("mañana") || lowerInput.includes("am"));
-                        if (hourInt <= 12 && !hasPeriod && !tMatch[0].includes(":")) {
-                            isAmbig = true;
-                            ambigH = hourInt;
-                            ambigM = m;
-                        }
-
-                        const isPm = matchesKeyword(lowerInput, periodKeywords.afternoon) || matchesKeyword(lowerInput, periodKeywords.night);
-                        if (isPm && hourInt < 12) hourInt += 12;
-                        detectedTime = `${hourInt.toString().padStart(2, '0')}:${m.padStart(2, '0')}`;
-                    }
-
-                    setIsTyping(false);
-                    if (isAmbig) {
-                        addMessage('assistant', `¿A las ${ambigH} de la mañana o de la tarde?`);
-                        setConversationState({ stage: 'awaiting_time_period', data: { ...conversationState.data, date: dateStr, tempHour: ambigH, tempMin: ambigM } });
-                    } else if (detectedTime) {
-                        if (conversationState.data.type === 'geo') {
-                            addMessage('assistant', `Entendido, el ${format(parseISO(dateStr), 'dd [de] MMMM', { locale: es })} a las ${detectedTime}. ¿En qué sitio quieres que te avise?`);
-                            setConversationState({ stage: 'awaiting_place', data: { ...conversationState.data, date: dateStr, time: detectedTime } });
-                        } else {
-                            const finalData = { ...conversationState.data, date: dateStr, time: detectedTime };
-                            setNewReminder(finalData); setIsAdding(true);
-                            addMessage('assistant', `¡Lo tengo todo! Alarma para el ${format(parseISO(dateStr), 'dd [de] MMMM', { locale: es })} a las ${detectedTime}. ¿Confirmamos?`);
-                            setConversationState({ stage: 'idle', data: {} });
-                        }
-                    } else {
-                        addMessage('assistant', `Vale, anotado para el ${format(parseISO(dateStr), 'dd [de] MMMM', { locale: es })}. ¿A qué hora quieres que suene?`);
-                        setConversationState({ stage: 'awaiting_time', data: { ...conversationState.data, date: dateStr } });
-                    }
-                    return;
-                }
-
-                if (conversationState.stage === 'awaiting_time') {
-                    const isNoTime = lowerInput.includes("no") || lowerInput.includes("sin") || lowerInput.includes("luego");
-
-                    // CORRECCIÓN DE FECHA EN EL TIEMPO
-                    const dateCorrection = lowerInput.match(/(\d{1,2})\s*del\s*mes\s*que\s*viene/i) || lowerInput.match(/dia\s*(\d{1,2})|día\s*(\d{1,2})/i);
-                    let finalDate = conversationState.data.date;
-                    if (dateCorrection) {
-                        const now = new Date();
-                        let target = new Date();
-                        if (lowerInput.includes("mes que viene")) {
-                            target = addMonths(startOfMonth(now), 1);
-                            target.setDate(parseInt(lowerInput.match(/\d+/)[0]));
-                        } else {
-                            target.setDate(parseInt(lowerInput.match(/\d+/)[0]));
-                            if (target < now) target = addMonths(target, 1);
-                        }
-                        finalDate = format(target, 'yyyy-MM-dd');
-                        addMessage('assistant', `Vale, cambiamos el día al ${format(target, 'dd [de] MMMM', { locale: es })}.`);
-                    }
-
-                    if (isNoTime && conversationState.data.type === 'geo') {
-                        setIsTyping(false);
-                        addMessage('assistant', "Sin hora fija. ¿En qué lugar quieres que me active?");
-                        setConversationState({ stage: 'awaiting_place', data: { ...conversationState.data, date: finalDate, time: "" } });
-                        return;
-                    }
-
-                    const timeRegex = /(\d{1,2})[:h](\d{2})|(?<=las|la|a las|a la|las\s|la\s|a\slas\s|a\sla\s|^)(\d{1,2})\b/gi;
-                    const timeMatch = lowerInput.match(timeRegex);
-
-                    if (timeMatch) {
-                        let raw = timeMatch[0].replace(/[:h]/g, ":");
-                        let h = raw.split(":")[0].trim();
-                        let m = raw.includes(":") ? raw.split(":")[1] : "00";
-                        let hourInt = parseInt(h);
-
-                        const isPm = matchesKeyword(lowerInput, periodKeywords.afternoon) || matchesKeyword(lowerInput, periodKeywords.night);
-                        const isAm = matchesKeyword(lowerInput, periodKeywords.morning);
-
-                        if (hourInt > 12 || isPm || isAm) {
-                            if (isPm && hourInt < 12) hourInt += 12;
-                            if (isAm && hourInt === 12) hourInt = 0;
-                            const timeStr = `${hourInt.toString().padStart(2, '0')}:${m.padStart(2, '0')}`;
-
-                            setIsTyping(false);
-                            if (conversationState.data.type === 'geo') {
-                                addMessage('assistant', `A las ${timeStr}. ¿En qué sitio quieres que te avise?`);
-                                setConversationState({ stage: 'awaiting_place', data: { ...conversationState.data, date: finalDate, time: timeStr } });
-                            } else {
-                                const finalData = { ...conversationState.data, date: finalDate, time: timeStr };
-                                setNewReminder(finalData); setIsAdding(true);
-                                addMessage('assistant', `¡Listo! Alarma el ${format(parseISO(finalDate), 'dd [de] MMMM', { locale: es })} a las ${timeStr}. ¿Confirmamos?`);
-                                setConversationState({ stage: 'idle', data: {} });
-                            }
-                        } else {
-                            setIsTyping(false);
-                            addMessage('assistant', `¿A las ${hourInt} de la mañana o de la tarde?`);
-                            setConversationState({ stage: 'awaiting_time_period', data: { ...conversationState.data, date: finalDate, tempHour: hourInt, tempMin: m } });
-                        }
-                    } else {
-                        addMessage('assistant', "No he pillado bien la hora. Prueba con 'las 5' o '15:30'.");
-                        setIsTyping(false);
-                    }
-                    return;
-                }
-
-                if (conversationState.stage === 'awaiting_time_period') {
-                    let h = conversationState.data.tempHour;
-                    const m = conversationState.data.tempMin || "00";
-                    if (matchesKeyword(lowerInput, periodKeywords.afternoon) || matchesKeyword(lowerInput, periodKeywords.night)) {
-                        if (h < 12) h += 12;
-                    } else if (matchesKeyword(lowerInput, periodKeywords.morning)) {
-                        if (h === 12) h = 0;
-                    }
-                    const timeStr = `${h.toString().padStart(2, '0')}:${m}`;
-                    setIsTyping(false);
-                    if (conversationState.data.type === 'geo') {
-                        addMessage('assistant', `¡Perfecto! A las ${timeStr}. ¿En qué lugar quieres que me active?`);
-                        setConversationState({ stage: 'awaiting_place', data: { ...conversationState.data, time: timeStr } });
-                    } else {
-                        const finalData = { ...conversationState.data, time: timeStr };
-                        setNewReminder(finalData); setIsAdding(true);
-                        addMessage('assistant', `Anotado para las ${timeStr}. ¿Confirmamos la alarma?`);
-                        setConversationState({ stage: 'idle', data: {} });
-                    }
-                    return;
-                }
-
-                if (conversationState.stage === 'awaiting_place') {
-                    const searchResp = await axios.get(`https://nominatim.openstreetmap.org/search?format=json&q=${input}&limit=1&addressdetails=1`, {
-                        headers: { 'Accept-Language': 'es' }
-                    });
-                    if (searchResp.data.length > 0) {
-                        const loc = searchResp.data[0];
-                        const finalData = { ...conversationState.data, address: loc.display_name, coordinates: [parseFloat(loc.lon), parseFloat(loc.lat)] };
-                        setNewReminder(finalData); setIsAdding(true); setIsTyping(false);
-                        addMessage('assistant', `¡Encontrado! Todo listo para "${finalData.title}". ¿Te parece bien?`);
-                        setConversationState({ stage: 'idle', data: {} });
-                    } else {
-                        setIsTyping(false);
-                        addMessage('assistant', `No encuentro "${input}". ¿Podrías decirme el sitio de nuevo o marcarlo en el mapa?`);
-                    }
-                    return;
-                }
-
-                // --- INICIO DE CONVERSACIÓN (Advanced Reasoning & Extraction) ---
-                if (matchesKeyword(lowerInput, triggers) && conversationState.stage === 'idle') {
-                    let processingText = lowerInput;
-
-                    // 1. Identificar y eliminar disparadores
-                    triggers.forEach(t => processingText = processingText.replace(t, ""));
-
-                    // 2. Extracción de HORA con formatos variados (Detección de Ambivalencia)
-                    let extractedTime = "";
-                    let isAmbig = false;
-                    let ambigH, ambigM;
-                    const timeRegex = /(\d{1,2})[:h](\d{2})|(?<=las|la|a las|a la|las\s|la\s|a\slas\s|a\sla\s)(\d{1,2})|(?<=\s)(\d{1,2})(?=\s*(am|pm|tarde|mañana|noche))/gi;
-                    const timeMatch = processingText.match(timeRegex);
-
-                    if (timeMatch) {
-                        let h = timeMatch[0].replace(/[:h]/g, ":").split(":")[0].trim();
-                        let m = timeMatch[0].includes(":") || timeMatch[0].includes("h") ? timeMatch[0].split(/[:h]/)[1] : "00";
-                        let hourInt = parseInt(h);
-                        
-                        const hasPeriod = (processingText.includes("tarde") || processingText.includes("noche") || processingText.includes("pm") || processingText.includes("mañana") || processingText.includes("am"));
-                        if (hourInt <= 12 && !hasPeriod && !timeMatch[0].includes(":")) {
-                            isAmbig = true;
-                            ambigH = hourInt;
-                            ambigM = m;
-                        }
-
-                        if ((processingText.includes("tarde") || processingText.includes("noche") || processingText.includes("pm")) && hourInt < 12) hourInt += 12;
-                        if ((processingText.includes("mañana") || processingText.includes("am")) && hourInt === 12) hourInt = 0;
-
-                        extractedTime = `${hourInt.toString().padStart(2, '0')}:${m.padStart(2, '0')}`;
-                        processingText = processingText.replace(timeMatch[0], "");
-                    }
-
-                    // 3. Extracción de FECHA avanzada
-                    const getInitDate = (text) => {
-                        const now = new Date();
-                        let target = new Date();
-                        const nextMonthMatch = text.match(/(\d{1,2})\s*del\s*mes\s*que\s*viene/i);
-                        if (nextMonthMatch) {
-                            target = addMonths(startOfMonth(now), 1);
-                            target.setDate(parseInt(nextMonthMatch[1]));
-                            return { date: format(target, 'yyyy-MM-dd'), mentioned: true };
-                        }
-                        const dayOnlyMatch = text.match(/dia\s*(\d{1,2})|día\s*(\d{1,2})|el\s*(\d{1,2})/i);
-                        if (dayOnlyMatch) {
-                            target.setDate(parseInt(dayOnlyMatch[0].match(/\d+/)[0]));
-                            if (target < now) target = addMonths(target, 1);
-                            return { date: format(target, 'yyyy-MM-dd'), mentioned: true };
-                        }
-                        if (matchesKeyword(text, tomorrowKeywords)) return { date: format(addDays(now, 1), 'yyyy-MM-dd'), mentioned: true };
-                        if (matchesKeyword(text, todayKeywords)) return { date: format(now, 'yyyy-MM-dd'), mentioned: true };
-
-                        const daysMap = { 'lunes': 1, 'martes': 2, 'miercoles': 3, 'miércoles': 3, 'jueves': 4, 'viernes': 5, 'sabado': 6, 'sábado': 6, 'domingo': 0 };
-                        for (let day in daysMap) {
-                            if (text.includes(day)) {
-                                const diff = (daysMap[day] + 7 - now.getDay()) % 7;
-                                return { date: format(addDays(now, diff === 0 ? 7 : diff), 'yyyy-MM-dd'), mentioned: true };
-                            }
-                        }
-                        return { date: format(now, 'yyyy-MM-dd'), mentioned: false };
-                    };
-                    const dateInfo = getInitDate(processingText);
-                    const extractedDate = dateInfo.date;
-                    const dateMentioned = dateInfo.mentioned;
-
-                    // 4. Extracción de LUGAR (en [lugar])
-                    let extractedPlace = "";
-                    const placeMatch = processingText.match(/ en (.*?)(?= hoy| mañana| a las| las| para| de|$)/);
-                    if (placeMatch) {
-                        extractedPlace = placeMatch[1].trim();
-                        processingText = processingText.replace(placeMatch[0], "");
-                    }
-
-                    // 5. Limpieza final del TÍTULO
-                    let finalTitle = processingText
-                        .replace(/\b(en|el|la|a|para|de|que|con|un|una)\b/gi, "")
-                        .replace(/\s+/g, " ")
-                        .trim();
-                    finalTitle = finalTitle.charAt(0).toUpperCase() + finalTitle.slice(1);
-
-                    // 6. Determinar Tipo
-                    let extractedType = null;
-                    if (matchesKeyword(lowerInput, geoKeywords) || extractedPlace) extractedType = 'geo';
-                    if (matchesKeyword(lowerInput, alarmKeywords) && !extractedPlace) extractedType = 'alarm';
-
-                    const data = {
-                        title: finalTitle || "",
-                        date: extractedDate,
-                        time: extractedTime,
-                        type: extractedType || (extractedPlace ? 'geo' : null),
-                        address: extractedPlace,
-                        radius: 1
-                    };
-
-                    setIsTyping(false);
-
-                    if (!data.title) {
-                        addMessage('assistant', "¡Claro! Yo te aviso. ¿Qué objetivo o tarea quieres recordar?");
-                        setConversationState({ stage: 'awaiting_title', data });
-                    } else if (isAmbig) {
-                        addMessage('assistant', `Entendido: "${data.title}". ¿A las ${ambigH} de la mañana o de la tarde?`);
-                        setConversationState({ stage: 'awaiting_time_period', data: { ...data, time: "", tempHour: ambigH, tempMin: ambigM } });
-                    } else if (!data.type) {
-                        addMessage('assistant', `Entendido: "${data.title}". ¿Quieres que sea un recordatorio por GPS o simplemente una alarma?`);
-                        setConversationState({ stage: 'awaiting_type', data });
-                    } else if (data.type === 'geo' && !data.address) {
-                        addMessage('assistant', `Vale, recordatorio por GPS para "${data.title}". ¿Dónde quieres que me active?`);
-                        setConversationState({ stage: 'awaiting_place', data });
-                    } else if (!dateMentioned && data.type === 'alarm') {
-                        addMessage('assistant', `Perfecto para "${data.title}". ¿Para qué día?`);
-                        setConversationState({ stage: 'awaiting_day', data });
-                    } else if (!data.time && data.type === 'alarm') {
-                        addMessage('assistant', `¿A qué hora pongo la alarma para "${data.title}"?`);
-                        setConversationState({ stage: 'awaiting_time', data });
-                    } else if (data.type === 'geo') {
-                        addMessage('assistant', `¡Lo tengo! Preparamos la alerta en "${data.address}" para "${data.title}". ¿Confirmamos?`);
-                        setConversationState({ stage: 'awaiting_place', data });
-                        // Trigger place search for the extracted place
-                        setChatInput(data.address);
-                        const fakeE = { preventDefault: () => { } };
-                        setTimeout(() => processChatCommand(fakeE), 50);
-                    } else {
-                        setNewReminder(data);
-                        setIsAdding(true);
-                        addMessage('assistant', `¡Listo! Alarma para "${data.title}" el ${format(parseISO(data.date), 'dd MMMM', { locale: es })} a las ${data.time}. ¿Ok?`);
-                        setConversationState({ stage: 'idle', data: {} });
-                    }
-                    return;
-                }
-
-                setIsTyping(false);
-                if (lowerInput.includes("hola") || lowerInput.includes("buenas")) {
-                    addMessage('assistant', "¡Hola! 👋 Soy Tisinapp. Tu asistente inteligente. Dime algo como: 'Recuérdame comprar pan en el Mercadona mañana a las 10'.");
-                } else if (lowerInput.includes("gracias") || lowerInput.includes("vale") || lowerInput.includes("perfecto")) {
-                    addMessage('assistant', "¡A ti! Estaré listo para avisarte. ✨");
-                } else {
-                    addMessage('assistant', "No estoy muy seguro de qué necesitas. Recuerda empezar con 'Recuérdame...' para crear una alerta.");
-                }
-
-            } catch (err) {
-                setIsTyping(false);
-                addMessage('assistant', "Vaya, parece que he tenido un pequeño error lógico. ¿Me lo podrías repetir de otra forma?");
-            }
-        }, 800);
-    };
-
-    const toggleComplete = async (reminder) => {
-        const newStatus = reminder.status === 'active' ? 'completed' : 'active';
-        try {
-            await axios.patch(`${API_URL}/${reminder._id}`, { status: newStatus });
-            fetchReminders();
-        } catch (err) {
-            console.error("Error updating status", err);
-        }
-    };
-
-    const deleteReminder = async (id) => {
-        try {
-            await axios.delete(`${API_URL}/${id}`);
-            fetchReminders();
-        } catch (err) {
-            console.error("Error deleting reminder", err);
-        }
-    };
-
-    // Calendar logic
+    // ==========================================
+    // VISTA DE CALENDARIO (DATE-FNS)
+    // ==========================================
     const renderCalendar = () => {
         const monthStart = startOfMonth(currentMonth);
         const monthEnd = endOfMonth(monthStart);
@@ -617,7 +301,7 @@ function Assistant() {
                             <div
                                 key={dayStr}
                                 onClick={() => {
-                                    setNewReminder({ ...newReminder, date: dayStr });
+                                    setNewReminder(prev => ({ ...prev, date: dayStr }));
                                     setFilter('all');
                                     setViewMode('list');
                                 }}
@@ -632,6 +316,7 @@ function Assistant() {
         );
     };
 
+    // Filtra los recordatorios en la lista según la pestaña seleccionada ('active', 'completed', 'all')
     const filteredReminders = reminders.filter(r => {
         if (filter === 'all') return true;
         return r.status === filter;
@@ -639,7 +324,7 @@ function Assistant() {
 
     return (
         <div className="app-container">
-            {/* Sidebar Toggle Button */}
+            {/* Botón de Colapso de la Barra Lateral */}
             <button
                 onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
                 className={`sidebar-toggle ${sidebarCollapsed ? 'collapsed' : ''}`}
@@ -647,6 +332,7 @@ function Assistant() {
                 {sidebarCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
             </button>
 
+            {/* Barra lateral flotante con efecto Vidrio (Glassmorphism) */}
             <div className={`ui-overlay sidebar glass-panel ${sidebarCollapsed ? 'collapsed' : ''}`}>
                 <header style={{ marginBottom: '1.2rem', flexShrink: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -661,6 +347,197 @@ function Assistant() {
                     </div>
                 </header>
 
+                {/* Formulario Directo de Recordatorio */}
+                <div className="creation-form" style={{
+                    flexShrink: 0,
+                    background: 'rgba(15, 23, 42, 0.6)',
+                    border: '1px solid var(--glass-border)',
+                    borderRadius: '20px',
+                    padding: '1rem',
+                    marginBottom: '1.5rem',
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.8rem'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.5rem' }}>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: 'white', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Bell size={16} className="text-primary" /> Nuevo Recordatorio
+                        </span>
+                        
+                        {/* Selector de Tipo (Alarma vs GPS) */}
+                        <div style={{ display: 'flex', gap: '0.2rem', background: 'rgba(0,0,0,0.3)', padding: '2px', borderRadius: '8px' }}>
+                            <button
+                                onClick={() => setReminderType('alarm')}
+                                style={{
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    padding: '0.3rem 0.6rem',
+                                    fontSize: '0.65rem',
+                                    cursor: 'pointer',
+                                    background: reminderType === 'alarm' ? 'var(--primary)' : 'transparent',
+                                    color: 'white',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    transition: 'var(--transition)'
+                                }}
+                            >
+                                <AlarmClock size={12} /> Alarma
+                            </button>
+                            <button
+                                onClick={() => setReminderType('gps')}
+                                style={{
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    padding: '0.3rem 0.6rem',
+                                    fontSize: '0.65rem',
+                                    cursor: 'pointer',
+                                    background: reminderType === 'gps' ? 'var(--primary)' : 'transparent',
+                                    color: 'white',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    transition: 'var(--transition)'
+                                }}
+                            >
+                                <MapPin size={12} /> GPS
+                            </button>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        <input
+                            type="text"
+                            placeholder="¿Qué quieres recordar?"
+                            value={newReminder.title}
+                            onChange={(e) => setNewReminder({ ...newReminder, title: e.target.value })}
+                            style={{
+                                width: '100%',
+                                padding: '0.6rem 0.8rem',
+                                borderRadius: '10px',
+                                background: 'rgba(0,0,0,0.4)',
+                                border: '1px solid var(--glass-border)',
+                                color: 'white',
+                                fontSize: '0.8rem',
+                                outline: 'none'
+                            }}
+                        />
+                        <textarea
+                            placeholder="Descripción (opcional)"
+                            value={newReminder.description}
+                            onChange={(e) => setNewReminder({ ...newReminder, description: e.target.value })}
+                            style={{
+                                width: '100%',
+                                padding: '0.6rem 0.8rem',
+                                borderRadius: '10px',
+                                background: 'rgba(0,0,0,0.4)',
+                                border: '1px solid var(--glass-border)',
+                                color: 'white',
+                                fontSize: '0.8rem',
+                                height: '50px',
+                                resize: 'none',
+                                outline: 'none'
+                            }}
+                        />
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <input
+                                type="date"
+                                value={newReminder.date}
+                                onChange={(e) => setNewReminder({ ...newReminder, date: e.target.value })}
+                                style={{
+                                    flex: 1,
+                                    padding: '0.5rem 0.6rem',
+                                    borderRadius: '8px',
+                                    background: 'rgba(0,0,0,0.4)',
+                                    border: '1px solid var(--glass-border)',
+                                    color: 'white',
+                                    fontSize: '0.75rem',
+                                    outline: 'none'
+                                }}
+                            />
+                            <input
+                                type="time"
+                                value={newReminder.time}
+                                onChange={(e) => setNewReminder({ ...newReminder, time: e.target.value })}
+                                style={{
+                                    width: '100px',
+                                    padding: '0.5rem 0.6rem',
+                                    borderRadius: '8px',
+                                    background: 'rgba(0,0,0,0.4)',
+                                    border: '1px solid var(--glass-border)',
+                                    color: 'white',
+                                    fontSize: '0.75rem',
+                                    outline: 'none'
+                                }}
+                            />
+                        </div>
+
+                        {/* Campos condicionales para Alertas GPS */}
+                        {reminderType === 'gps' && (
+                            <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.2rem' }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0.5rem', background: 'rgba(99, 102, 241, 0.05)', border: '1px dashed rgba(99, 102, 241, 0.3)', borderRadius: '8px' }}>
+                                    <MapPin size={14} className="text-primary" />
+                                    <span style={{ fontSize: '0.7rem', color: '#cbd5e1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '240px' }}>
+                                        {newReminder.address || 'Haz clic en el mapa para marcar ubicación'}
+                                    </span>
+                                </div>
+                                
+                                {newReminder.coordinates && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Radio de Alerta:</span>
+                                            <span style={{ fontSize: '0.65rem', fontWeight: 'bold', color: 'var(--accent)' }}>{newReminder.radius} km</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="0.1"
+                                            max="10"
+                                            step="0.1"
+                                            value={newReminder.radius}
+                                            onChange={(e) => setNewReminder({ ...newReminder, radius: parseFloat(e.target.value) })}
+                                            style={{
+                                                width: '100%',
+                                                accentColor: 'var(--primary)',
+                                                cursor: 'pointer'
+                                            }}
+                                        />
+                                    </div>
+                                )}
+                            </motion.div>
+                        )}
+
+                        <button
+                            onClick={saveReminder}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '8px',
+                                background: 'var(--primary)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '10px',
+                                padding: '0.6rem',
+                                fontSize: '0.8rem',
+                                fontWeight: 'bold',
+                                cursor: 'pointer',
+                                transition: 'var(--transition)',
+                                marginTop: '0.2rem'
+                            }}
+                            onMouseEnter={(e) => e.target.style.background = 'var(--primary-dark)'}
+                            onMouseLeave={(e) => e.target.style.background = 'var(--primary)'}
+                        >
+                            <Plus size={16} /> Guardar Recordatorio
+                        </button>
+                    </div>
+                </div>
+
+                {/* Filtro de Listado (Libres / Hechos / Todos) */}
                 <div className="filter-tabs" style={{ display: 'flex', gap: '0.3rem', marginBottom: '1rem', background: 'var(--glass)', padding: '0.2rem', borderRadius: '10px', flexShrink: 0 }}>
                     {[{ id: 'active', label: 'Libres', icon: Clock }, { id: 'completed', label: 'Hechos', icon: CheckCircle2 }, { id: 'all', label: 'Todos', icon: LayoutGrid }].map(tab => (
                         <button key={tab.id} onClick={() => setFilter(tab.id)} style={{
@@ -674,34 +551,7 @@ function Assistant() {
                     ))}
                 </div>
 
-                {/* AI Chat History Container - NOW AT THE TOP */}
-                <div className="chat-area" style={{ flexShrink: 0, background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--glass-border)', borderRadius: '20px', padding: '1rem', marginBottom: '1.5rem', boxShadow: '0 4px 20px rgba(0,0,0,0.4)' }}>
-                    <div style={{ height: '140px', overflowY: 'auto', marginBottom: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.6rem', paddingRight: '5px' }}>
-                        {chatHistory.map((msg, i) => (
-                            <div key={i} style={{
-                                alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                                background: msg.role === 'user' ? 'var(--primary)' : 'rgba(255,255,255,0.08)',
-                                color: 'white',
-                                padding: '0.6rem 0.9rem', borderRadius: '14px', fontSize: '0.75rem', maxWidth: '85%',
-                                boxShadow: msg.role === 'user' ? '0 4px 12px rgba(99, 102, 241, 0.3)' : 'none'
-                            }}>
-                                {msg.content}
-                            </div>
-                        ))}
-                        {isTyping && <div className="typing-dots">...</div>}
-                        <div ref={chatEndRef} />
-                    </div>
-
-                    <form onSubmit={processChatCommand} style={{ display: 'flex', gap: '0.5rem' }}>
-                        <input type="text" placeholder="¿Qué quieres recordar?" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
-                            style={{ flex: 1, background: 'rgba(0,0,0,0.4)', border: '1px solid var(--glass-border)', color: 'white', padding: '0.6rem 1rem', borderRadius: '12px', outline: 'none', fontSize: '0.8rem' }}
-                        />
-                        <button type="submit" style={{ background: 'var(--primary)', border: 'none', borderRadius: '12px', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', cursor: 'pointer', transition: 'var(--transition)' }}>
-                            <Send size={16} />
-                        </button>
-                    </form>
-                </div>
-
+                {/* Listado Principal de Recordatorios */}
                 <div className="reminders-list" style={{ flex: 1, overflowY: 'auto', paddingRight: '0.5rem' }}>
                     <AnimatePresence mode="wait">
                         {viewMode === 'calendar' ? (
@@ -763,40 +613,8 @@ function Assistant() {
                     </AnimatePresence>
                 </div>
 
-                {/* Adding Popup / Editor */}
+                {/* Vista Detallada Popup del Recordatorio Seleccionado */}
                 <AnimatePresence>
-                    {isAdding && (
-                        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
-                            style={{ position: 'absolute', top: '240px', left: '1rem', right: '1rem', background: '#1e293b', border: '1px solid var(--primary)', padding: '1.2rem', borderRadius: '24px', zIndex: 100, boxShadow: '0 20px 40px rgba(0,0,0,0.6)' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
-                                <h3 style={{ fontSize: '1rem', color: 'white', marginBottom: '0.2rem' }}>Nueva Alerta</h3>
-                                <input type="text" placeholder="¿Qué quieres recordar?" value={newReminder.title} onChange={(e) => setNewReminder({ ...newReminder, title: e.target.value })}
-                                    style={{ width: '100%', padding: '0.8rem', borderRadius: '12px', background: 'var(--glass)', border: '1px solid var(--glass-border)', color: 'white', fontSize: '0.85rem' }}
-                                />
-                                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <input type="date" value={newReminder.date} onChange={(e) => setNewReminder({ ...newReminder, date: e.target.value })}
-                                        style={{ flex: 2, padding: '0.6rem', borderRadius: '10px', background: 'var(--glass)', border: '1px solid var(--glass-border)', color: 'white', fontSize: '0.8rem' }}
-                                    />
-                                    <input type="time" value={newReminder.time} onChange={(e) => setNewReminder({ ...newReminder, time: e.target.value })}
-                                        style={{ flex: 1, padding: '0.6rem', borderRadius: '10px', background: 'var(--glass)', border: '1px solid var(--glass-border)', color: 'white', fontSize: '0.8rem' }}
-                                    />
-                                </div>
-                                {newReminder.coordinates &&
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem', padding: '0.5rem 0' }}>
-                                        <input type="range" min="0.1" max="10" step="0.1" value={newReminder.radius} onChange={(e) => setNewReminder({ ...newReminder, radius: parseFloat(e.target.value) })}
-                                            style={{ flex: 1, accentColor: 'var(--primary)' }}
-                                        />
-                                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', minWidth: '45px' }}>{newReminder.radius} km</span>
-                                    </div>
-                                }
-                                <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.5rem' }}>
-                                    <button onClick={saveReminder} style={{ flex: 2, padding: '0.8rem', borderRadius: '12px', background: 'var(--primary)', color: 'white', border: 'none', fontWeight: 'bold', fontSize: '0.85rem', cursor: 'pointer' }}>Confirmar Recordatorio</button>
-                                    <button onClick={() => setIsAdding(false)} style={{ flex: 1, padding: '0.8rem', borderRadius: '12px', background: 'transparent', color: 'white', border: '1px solid var(--glass-border)', fontSize: '0.85rem', cursor: 'pointer' }}>No</button>
-                                </div>
-                            </div>
-                        </motion.div>
-                    )}
-
                     {selectedReminder && (
                         <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
                             style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '90%', maxWidth: '340px', background: '#0f172a', border: '1px solid var(--glass-border)', padding: '1.5rem', borderRadius: '24px', zIndex: 1100, boxShadow: '0 30px 60px rgba(0,0,0,0.8)' }}>
@@ -804,7 +622,7 @@ function Assistant() {
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div style={{ color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', fontWeight: 'bold', textTransform: 'uppercase' }}>
                                         {selectedReminder.location ? <MapPin size={16} /> : <AlarmClock size={16} />}
-                                        {selectedReminder.type === 'geo' ? 'Geo-Alerta' : 'Alarma'}
+                                        {selectedReminder.location ? 'Geo-Alerta' : 'Alarma'}
                                     </div>
                                     <button onClick={() => setSelectedReminder(null)} className="icon-btn small"><ChevronLeft size={16} /></button>
                                 </div>
@@ -848,6 +666,7 @@ function Assistant() {
                 </AnimatePresence>
             </div>
 
+            {/* Mapa Interactivo (Capa de Leaflet) */}
             <MapView
                 reminders={reminders.filter(r => r.location)}
                 userLocation={userLocation}
@@ -856,6 +675,7 @@ function Assistant() {
                     setSidebarCollapsed(false);
                     setViewMode('list');
                     setFilter('all');
+                    setSelectedReminder(r);
                 }}
             />
         </div>

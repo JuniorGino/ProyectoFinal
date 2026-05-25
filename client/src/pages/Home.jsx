@@ -1,3 +1,13 @@
+/**
+ * PÁGINA DE INICIO (HOME) - Home.jsx
+ * 
+ * Este componente representa la landing page (página de bienvenida) de Tisinapp.
+ * Presenta una introducción visual premium del sistema con:
+ * - Una sección de héroe con tipografía grande y gradientes.
+ * - Una cuadrícula de características principales que explican las alertas GPS, el formulario inteligente de recordatorios y las políticas de privacidad.
+ * - Enlaces directos para registrarse o ir al Asistente.
+ */
+
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { MapPin, Shield, Zap, ArrowRight, Sparkles } from 'lucide-react';
@@ -7,7 +17,10 @@ const Home = () => {
     return (
         <div className="page-container" style={{ width: '100%' }}>
             <div style={{ padding: '4rem 2rem', maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '4rem' }}>
-                {/* Hero Section */}
+                
+                {/* ==========================================
+                    SECCIÓN DE HERO (PANTALLA DE BIENVENIDA)
+                   ========================================== */}
                 <motion.div
                     initial={{ opacity: 0, y: 30 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -15,6 +28,7 @@ const Home = () => {
                     className="hero"
                     style={{ textAlign: 'center', marginTop: '3rem' }}
                 >
+                    {/* Etiqueta premium de lanzamiento */}
                     <motion.div
                         initial={{ scale: 0.9 }}
                         animate={{ scale: 1 }}
@@ -37,6 +51,8 @@ const Home = () => {
                     >
                         <Sparkles size={14} /> EL FUTURO DE LOS RECORDATORIOS
                     </motion.div>
+
+                    {/* Título Principal con degradado de colores */}
                     <h1 style={{
                         fontSize: 'clamp(3rem, 8vw, 4.5rem)',
                         fontWeight: '900',
@@ -50,9 +66,13 @@ const Home = () => {
                     }}>
                         Tisinapp: Tu Ubicación, <br /> Tu Memoria Inteligente.
                     </h1>
+
+                    {/* Subtítulo descriptivo */}
                     <p style={{ fontSize: '1.25rem', color: 'rgba(255,255,255,0.6)', maxWidth: '750px', margin: '0 auto 3.5rem', lineHeight: '1.7' }}>
-                        Deja de preocuparte por olvidar tareas importantes. Tisinapp utiliza IA y geolocalización avanzada para recordarte qué hacer justo en el momento y lugar exactos.
+                        Deja de preocuparte por olvidar tareas importantes. Tisinapp utiliza geolocalización avanzada y alarmas en tiempo real para recordarte qué hacer justo en el momento y lugar exactos.
                     </p>
+
+                    {/* Botones de acción directa con efectos hover */}
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
                         <NavLink to="/register" style={{
                             display: 'inline-flex', alignItems: 'center', gap: '0.75rem',
@@ -74,12 +94,29 @@ const Home = () => {
                     </div>
                 </motion.div>
 
-                {/* Features Grid */}
+                {/* ==========================================
+                    SECCIÓN DE CARACTERÍSTICAS PRINCIPALES
+                   ========================================== */}
                 <div className="features-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '2rem', marginTop: '2rem' }}>
                     {[
-                        { icon: MapPin, title: "Alertas Geo-al Instante", desc: "Define perímetros inteligentes. Recibe notificaciones push en el momento exacto en que cruzas el radio de tu destino.", color: 'var(--primary)' },
-                        { icon: Zap, title: "Asistente con IA", desc: "Habla de forma natural. Nuestra IA entiende frases complejas y las traduce en geoperímetros automáticos.", color: '#f59e0b' },
-                        { icon: Shield, title: "Seguridad End-to-End", desc: "Tus datos de ubicación son privados. Solo tú decides qué lugares recordar y cómo se gestiona tu historial.", color: '#10b981' }
+                        { 
+                            icon: MapPin, 
+                            title: "Alertas Geo-al Instante", 
+                            desc: "Define perímetros inteligentes. Recibe notificaciones push en el momento exacto en que cruzas el radio de tu destino.", 
+                            color: 'var(--primary)' 
+                        },
+                        { 
+                            icon: Zap, 
+                            title: "Formulario Directo Inteligente", 
+                            desc: "Crea alertas horarias y por GPS en segundos con una interfaz intuitiva y minimalista completamente integrada con el mapa.", 
+                            color: '#f59e0b' 
+                        },
+                        { 
+                            icon: Shield, 
+                            title: "Seguridad End-to-End", 
+                            desc: "Tus datos de ubicación son privados. Solo tú decides qué lugares recordar y cómo se gestiona tu historial de recordatorios.", 
+                            color: '#10b981' 
+                        }
                     ].map((feat, i) => (
                         <motion.div
                             initial={{ opacity: 0, scale: 0.95 }}
@@ -100,6 +137,7 @@ const Home = () => {
                                 cursor: 'default'
                             }}
                         >
+                            {/* Icono de la característica con color personalizado */}
                             <div style={{ width: '64px', height: '64px', background: `${feat.color}15`, borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: feat.color, border: `1px solid ${feat.color}30` }}>
                                 <feat.icon size={32} />
                             </div>
@@ -109,7 +147,7 @@ const Home = () => {
                     ))}
                 </div>
 
-                {/* Social / Trust Section Placeholder */}
+                {/* Pie de página de copyright */}
                 <motion.div
                     initial={{ opacity: 0 }}
                     whileInView={{ opacity: 1 }}
