@@ -18,6 +18,7 @@
 import React, { useState, useEffect } from 'react';
 import MapView from '../components/Map';
 import axios from 'axios';
+import { getReminders, createReminder, updateReminderStatus, deleteReminder as apiDeleteReminder } from '../services/api';
 import {
     Bell, MapPin, Trash2, CheckCircle, Clock, LayoutGrid, CheckCircle2,
     Sparkles, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlarmClock, List, Plus
@@ -30,9 +31,6 @@ import {
     eachDayOfInterval, parseISO
 } from 'date-fns';
 import { es } from 'date-fns/locale';
-
-// Endpoint base del servidor para las operaciones CRUD
-const API_URL = 'http://localhost:5000/api/reminders';
 
 function Assistant() {
     // ==========================================
@@ -84,23 +82,23 @@ function Assistant() {
     }, []);
 
     // ==========================================
-    // OPERACIONES CRUD (CONEXIÓN CON API REST)
+    // OPERACIONES CRUD (CONEXIÓN CON API REST O LOCALSTORAGE)
     // ==========================================
 
     /**
-     * Obtiene los recordatorios de la base de datos local (NeDB) mediante GET.
+     * Obtiene los recordatorios de la base de datos local (NeDB) o LocalStorage mediante GET.
      */
     const fetchReminders = async () => {
         try {
-            const resp = await axios.get(API_URL);
-            setReminders(resp.data);
+            const data = await getReminders();
+            setReminders(data);
         } catch (err) {
             console.error('Error fetching reminders', err);
         }
     };
 
     /**
-     * Guarda el recordatorio (Alarma o Geo-Alerta) llamando a POST.
+     * Guarda el recordatorio (Alarma o Geo-Alerta) llamando al servicio.
      */
     const saveReminder = async () => {
         if (!newReminder.title) {
@@ -120,7 +118,7 @@ function Assistant() {
         };
 
         try {
-            await axios.post(API_URL, reminderData);
+            await createReminder(reminderData);
             // Reinicia los campos del formulario tras guardar con éxito
             setNewReminder({
                 title: '',
@@ -138,12 +136,12 @@ function Assistant() {
     };
 
     /**
-     * Cambia el estado del recordatorio entre 'active' y 'completed' llamando a PATCH.
+     * Cambia el estado del recordatorio entre 'active' y 'completed'.
      */
     const toggleComplete = async (reminder) => {
         const newStatus = reminder.status === 'active' ? 'completed' : 'active';
         try {
-            await axios.patch(`${API_URL}/${reminder._id}`, { status: newStatus });
+            await updateReminderStatus(reminder._id, newStatus);
             fetchReminders();
         } catch (err) {
             console.error("Error updating status", err);
@@ -151,11 +149,11 @@ function Assistant() {
     };
 
     /**
-     * Elimina el recordatorio de forma permanente llamando a DELETE.
+     * Elimina el recordatorio de forma permanente.
      */
     const deleteReminder = async (id) => {
         try {
-            await axios.delete(`${API_URL}/${id}`);
+            await apiDeleteReminder(id);
             fetchReminders();
         } catch (err) {
             console.error("Error deleting reminder", err);

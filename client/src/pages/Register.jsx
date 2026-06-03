@@ -12,7 +12,7 @@
 import React, { useState } from 'react';
 import { UserPlus, Mail, Lock, ArrowRight, LogIn as LogInIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { login, register } from '../services/api';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const Auth = () => {
@@ -51,20 +51,17 @@ const Auth = () => {
         setError(''); // Limpia errores anteriores
         try {
             if (isLogin) {
-                // Petición POST para verificar las credenciales del usuario
-                const resp = await axios.post('http://localhost:5000/api/auth/login', {
-                    email: formData.email,
-                    password: formData.password
-                });
+                // Petición de login usando el servicio adaptativo
+                const userData = await login(formData.email, formData.password);
                 
-                // Si es correcto, guarda los datos del usuario logueado en LocalStorage
-                localStorage.setItem('user', JSON.stringify(resp.data));
+                // Guarda los datos del usuario logueado en LocalStorage
+                localStorage.setItem('user', JSON.stringify(userData));
                 
                 // Redirige al Asistente/Recordatorios
                 navigate('/assistant');
             } else {
-                // Petición POST para registrar una cuenta nueva
-                await axios.post('http://localhost:5000/api/auth/register', formData);
+                // Petición de registro usando el servicio adaptativo
+                await register(formData.name, formData.email, formData.password);
                 
                 // Cambia al formulario de login tras el éxito e informa al usuario
                 setIsLogin(true);
@@ -72,7 +69,7 @@ const Auth = () => {
             }
         } catch (err) {
             // Captura errores retornados por el servidor o errores de conexión
-            setError(err.response?.data?.message || (isLogin ? 'Credenciales incorrectas' : 'Error al registrar.'));
+            setError(err.response?.data?.message || err.message || (isLogin ? 'Credenciales incorrectas' : 'Error al registrar.'));
         }
     };
 
